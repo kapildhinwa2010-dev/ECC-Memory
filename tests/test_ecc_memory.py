@@ -73,3 +73,43 @@ def test_constructor_rejects_zero():
 
 def test_spiral_size_one():
     assert spiral_coordinates(1) == [(0, 0)]
+
+
+def test_repair_fixes_single_corruption():
+    mem = HelixMemory(size=8, record_size=2)
+    mem.write("a", b"\x12\x34")
+    x, y = mem.coords[mem.address("a")]
+    original = int(mem.arena[x, y])
+    mem.corrupt("a")
+    assert mem.verify() is False
+    repaired = mem.repair()
+    assert (x, y) in repaired
+    assert int(mem.arena[x, y]) == original
+    assert mem.verify() is True
+
+
+def test_verify_detailed_locates_corruption():
+    mem = HelixMemory(size=8, record_size=2)
+    mem.write("a", b"\x10\x20")
+    x, y = mem.coords[mem.address("a")]
+    mem.corrupt("a")
+    detail = mem.verify_detailed()
+    assert detail["bad_rows"] == [x]
+    assert detail["bad_cols"] == [y]
+
+
+def test_repair_noop_on_clean_memory():
+    mem = HelixMemory(size=8, record_size=2)
+    mem.write("a", b"\x01\x02")
+    assert mem.repair() == []
+
+
+def test_column_parity_maintained_on_write():
+    mem = HelixMemory(size=8, record_size=2)
+    mem.write("a", b"\x10\x20")
+    mem.write("b", b"\x30\x40")
+    for col in range(mem.size):
+        p = 0
+        for row in range(mem.size):
+            p ^= int(mem.arena[row, col])
+        assert p == int(mem.col_parity[col])
