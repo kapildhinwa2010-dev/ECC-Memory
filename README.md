@@ -1,42 +1,56 @@
 # ECC-Memory
 
-Spiral-addressed memory with XOR parity protection.
+[![CI](https://github.com/kapildhinwa2010-dev/ECC-Memory/actions/workflows/ci.yml/badge.svg)](https://github.com/kapildhinwa2010-dev/ECC-Memory/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/kapildhinwa2010-dev/ECC-Memory/actions/workflows/codeql.yml/badge.svg)](https://github.com/kapildhinwa2010-dev/ECC-Memory/actions/workflows/codeql.yml)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+Error-correcting spiral memory: row AND column XOR parity locate and repair single-cell corruption.
 
 **Part of the [Kapildhinwa2010-dev Toolkit](https://github.com/kapildhinwa2010-dev/Kapildhinwa2010-dev).**
 
-![CI](https://github.com/kapildhinwa2010-dev/ECC-Memory/actions/workflows/ci.yml/badge.svg)
-![CodeQL](https://github.com/kapildhinwa2010-dev/ECC-Memory/actions/workflows/codeql.yml/badge.svg)
-![Python](https://img.shields.io/badge/python-3.9%2B-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+## What it does
 
-## ✨ Features
+HelixMemory writes records across consecutive spiral cells. Every cell
+is protected by a row XOR parity and a column XOR parity: verify_detailed()
+names the bad rows and columns, and repair() corrects a single corrupted
+cell (bad column locates it, row parity recovers the byte). This is the
+strongest parity scheme in the toolkit family - the safe design that the
+source experiments kept.
 
-- Clockwise spiral coordinate walk over a square arena
-- Deterministic string-key addressing
-- Row XOR parity detects byte corruption
+## Install
 
-## 📦 Install
+    pip install -r requirements.txt
 
-```bash
-pip install -r requirements.txt
-```
+## Quick start
 
-## 🚀 Quick start
+    from ecc_memory import HelixMemory
 
-```python
-from ecc_memory import HelixMemory
+    mem = HelixMemory(size=8, record_size=4)
+    mem.write("alpha", b"\x01\x02\x03\x04")
+    mem.corrupt("alpha")
+    assert not mem.verify()
+    mem.repair()
+    assert mem.read_record("alpha") == b"\x01\x02\x03\x04"
 
-mem = HelixMemory(size=8, record_size=2)
-mem.write('a', b'\x10\x20')
-assert mem.verify()
-```
+## API
 
-## 🧪 Tests
+- write / read_record / read_cell / verify / verify_detailed / repair /
+  corrupt / usage
+- spiral_coordinates(size)
 
-```bash
-pytest tests/ -v
-```
+## Honest results and limitations
 
-## 📄 License
+- Only SINGLE-cell corruption is correctable. Two flipped cells in the
+  same row or column are detectable but repair() returns [] and the
+  data stays broken.
+- The parity bytes themselves are unprotected; a flip in a parity byte
+  looks like a data corruption and triggers a wrong "repair".
+- Keys hash by character sum: different keys can map to overlapping
+  cell ranges and silently overwrite each other.
+- This is XOR parity, not Reed-Solomon: it corrects one bad cell, not
+  burst errors. Research toy, not trustworthy storage.
 
-MIT — see [LICENSE](LICENSE).
+## License
+
+MIT - see [LICENSE](LICENSE).

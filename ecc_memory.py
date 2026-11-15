@@ -1,16 +1,16 @@
-# ECC-Memory - XOR-parity error-correcting memory slots against bit-rot
+# ECC-Memory - Two-dimensional XOR-parity error-correcting memory against bit-rot
 # Part of the Kapildhinwa2010-dev Toolkit.
 
 """Spiral-addressed byte arena with two-dimensional XOR parity ECC.
 
-Lineage: reserv.dean-part-2 (helix.py). Content is addressed by a spiral
-coordinate walk over a square arena. Every byte cell is protected by BOTH
-a row XOR parity and a column XOR parity, so a single corrupted cell is
-detectable AND correctable (the row parity recovers the original byte,
-the column parity locates it).
+Lineage: reserv.dean-part-2 (helix.py). Records are written across
+consecutive spiral cells; every cell is protected by BOTH a row XOR
+parity and a column XOR parity. A single corrupted cell is detectable
+and correctable (the bad column locates it, the row parity recovers
+the byte).
 
-HONEST LIMITATIONS: only SINGLE-cell corruption per repair is correctable;
-two corrupted cells in the same row (or column) are detectable but not
+HONEST LIMITATIONS: only single-cell corruption is correctable. Two
+corrupted cells in the same row (or column) are detectable but not
 correctable, and the parity bytes themselves are not protected.
 """
 
@@ -22,7 +22,7 @@ __all__ = ["spiral_coordinates", "HelixMemory"]
 
 
 def spiral_coordinates(size: int):
-    """Clockwise spiral walk of an ``size x size`` grid from the center."""
+    """Clockwise spiral walk of a size x size grid from the center."""
     if size < 1:
         raise ValueError("size must be >= 1")
     coords = []
@@ -32,8 +32,7 @@ def spiral_coordinates(size: int):
     step = 1
     while len(coords) < size * size:
         for d_index, (dx, dy) in enumerate(directions):
-            length = step
-            for _ in range(length):
+            for _ in range(step):
                 if len(coords) >= size * size:
                     return coords
                 x += dx
@@ -72,30 +71,43 @@ class HelixMemory:
         return digest % len(self.coords)
 
     def write(self, key: str, record: bytes) -> None:
+        """Write record bytes across consecutive spiral cells (with wrap)."""
         record = bytes(record)
         if len(record) != self.record_size:
             raise ValueError("record must be exactly {} bytes".format(self.record_size))
         index = self.address(key)
-        x, y = self.coords[index]
-        self.arena[x, y] = record[0] ^ record[1] if self.record_size >= 2 else record[0]
-        self.parity[x] = _xor_parity(self.arena[x])
-        self.col_parity[y] = _xor_parity(self.arena[:, y])
+        touched_rows: set = set()
+        touched_cols: set = set()
+        for offset, byte in enumerate(record):
+            x, y = self.coords[(index + offset) % len(self.coords)]
+            self.arena[x, y] = byte
+            touched_rows.add(x)
+            touched_cols.add(y)
+        for row in touched_rows:
+            self.parity[row] = _xor_parity(self.arena[row])
+        for col in touched_cols:
+            self.col_parity[col] = _xor_parity(self.arena[:, col])
         self._used.add(key)
 
+    def read_record(self, key: str) -> bytes:
+        """Read back the record bytes written at this key."""
+        index = self.address(key)
+        out = []
+        for offset in range(self.record_size):
+            x, y = self.coords[(index + offset) % len(self.coords)]
+            out.append(int(self.arena[x, y]))
+        return bytes(out)
+
     def read_cell(self, key: str) -> int:
+        """First record byte (kept for backward compatibility)."""
         index = self.address(key)
         x, y = self.coords[index]
         return int(self.arena[x, y])
 
     def verify(self) -> bool:
         """True when every row AND column matches its XOR parity."""
-        for row in range(self.size):
-            if _xor_parity(self.arena[row]) != int(self.parity[row]):
-                return False
-        for col in range(self.size):
-            if _xor_parity(self.arena[:, col]) != int(self.col_parity[col]):
-                return False
-        return True
+        detail = self.verify_detailed()
+        return not detail["bad_rows"] and not detail["bad_cols"]
 
     def verify_detailed(self) -> dict:
         """Return {"bad_rows": [...], "bad_cols": [...]} for diagnosis."""
@@ -110,7 +122,8 @@ class HelixMemory:
 
         The bad column locates the cell; the row parity recovers the
         original byte. Returns the list of repaired (x, y) cells. Two or
-        more corrupted cells in one row or column are NOT correctable.
+        more corrupted cells in one row or column are NOT correctable;
+        multiple bad rows or columns are returned unrepaired.
         """
         detail = self.verify_detailed()
         repaired = []
@@ -122,12 +135,13 @@ class HelixMemory:
                     row_xor_others ^= int(self.arena[x, c])
             original = row_xor_others ^ int(self.parity[x])
             self.arena[x, y] = original
+            self.parity[x] = _xor_parity(self.arena[x])
             self.col_parity[y] = _xor_parity(self.arena[:, y])
             repaired.append((x, y))
         return repaired
 
     def corrupt(self, key: str) -> None:
-        """Flip one byte (for testing corruption detection)."""
+        """Flip the first record byte; parity is left stale so verify() detects it."""
         index = self.address(key)
         x, y = self.coords[index]
         self.arena[x, y] ^= 0xFF
