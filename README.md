@@ -1,57 +1,74 @@
 # ECC-Memory
 
-[![CI](https://github.com/kapildhinwa2010-dev/ECC-Memory/actions/workflows/ci.yml/badge.svg)](https://github.com/kapildhinwa2010-dev/ECC-Memory/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/kapildhinwa2010-dev/ECC-Memory/actions/workflows/codeql.yml/badge.svg)](https://github.com/kapildhinwa2010-dev/ECC-Memory/actions/workflows/codeql.yml)
+ECC-Memory is a small Python library that stores fixed-size byte records in an in-memory square array, assigns record starts using a center-out spiral index, and maintains row and column XOR parity. Its `HelixMemory` class can check parity and repair one corrupted data cell when the parity information identifies exactly one bad row and one bad column.
 
-[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+This is an experimental, process-local data structure—not persistent or production-grade storage. The arena and parity are held in NumPy arrays in memory; the project does not implement disk I/O, serialization, or a command-line interface.
 
-Error-correcting spiral memory: row AND column XOR parity locate and repair single-cell corruption.
+## Features
 
-**Part of the [Kapildhinwa2010-dev Toolkit](https://github.com/kapildhinwa2010-dev/Kapildhinwa2010-dev).**
+- Generate a center-out spiral traversal of a square grid with `spiral_coordinates(size)`.
+- Write and read fixed-length byte records with `HelixMemory.write()` and `read_record()`.
+- Inspect the first byte of a record with `read_cell()`.
+- Check all row and column parity with `verify()` or inspect mismatching indices with `verify_detailed()`.
+- Attempt repair of one damaged cell with `repair()`; the method returns the repaired `(row, column)` coordinate or an empty list when its single-cell repair condition is not met.
+- Simulate corruption of a record's first byte with `corrupt()` and report the number of distinct written keys and an approximate grid usage fraction with `len(memory)` and `memory.usage()`.
 
-## What it does
+## Requirements and installation
 
-HelixMemory writes records across consecutive spiral cells. Every cell
-is protected by a row XOR parity and a column XOR parity: verify_detailed()
-names the bad rows and columns, and repair() corrects a single corrupted
-cell (bad column locates it, row parity recovers the byte). This is the
-strongest parity scheme in the toolkit family - the safe design that the
-source experiments kept.
+The project requires Python 3.9 or later and NumPy 1.24 or later. Install the project from its repository directory with:
 
-## Install
+```bash
+python -m pip install .
+```
 
-    pip install -r requirements.txt
+For development and tests, install the declared requirements (which include pytest):
 
-## Quick start
+```bash
+python -m pip install -r requirements.txt
+```
 
-    from ecc_memory import HelixMemory
+There is no CLI. Use the Python module and its `HelixMemory` class directly.
 
-    mem = HelixMemory(size=8, record_size=4)
-    mem.write("alpha", b"\x01\x02\x03\x04")
-    mem.corrupt("alpha")
-    assert not mem.verify()
-    mem.repair()
-    assert mem.read_record("alpha") == b"\x01\x02\x03\x04"
+## Example
 
-## API
+```python
+from ecc_memory import HelixMemory
 
-- write / read_record / read_cell / verify / verify_detailed / repair /
-  corrupt / usage
-- spiral_coordinates(size)
+memory = HelixMemory(size=8, record_size=4)
+memory.write("alpha", b"\x01\x02\x03\x04")
 
-## Honest results and limitations
+assert memory.read_record("alpha") == b"\x01\x02\x03\x04"
+assert memory.verify()
 
-- Only SINGLE-cell corruption is correctable. Two flipped cells in the
-  same row or column are detectable but repair() returns [] and the
-  data stays broken.
-- The parity bytes themselves are unprotected; a flip in a parity byte
-  looks like a data corruption and triggers a wrong "repair".
-- Keys hash by character sum: different keys can map to overlapping
-  cell ranges and silently overwrite each other.
-- This is XOR parity, not Reed-Solomon: it corrects one bad cell, not
-  burst errors. Research toy, not trustworthy storage.
+# Demonstrate detection and repair of one changed data cell.
+memory.corrupt("alpha")
+assert not memory.verify()
+repaired_cells = memory.repair()
+assert len(repaired_cells) == 1
+assert memory.verify()
+assert memory.read_record("alpha") == b"\x01\x02\x03\x04"
+```
+
+`record_size` defaults to 4 and must be positive. Each `write()` requires a byte sequence exactly that length. Record bytes occupy consecutive spiral cells, wrapping at the end of the traversal.
+
+## Tests
+
+Run the tests from the repository root:
+
+```bash
+python -m pytest -q
+```
+
+On the reviewed commit `69dcfa2191375b3acb9a44c6bbd9464cc21accd9`, this command completed with **6 passed**. The GitHub Actions CI definition also specifies pytest, compilation, and a module-import smoke test on Python 3.10, 3.11, and 3.12; this local result is not a statement about the status of a GitHub Actions run.
+
+## Limitations
+
+- Repair handles only the case of exactly one bad data row and one bad data column. Multiple corrupted cells are not generally correctable; `repair()` can return an empty list while data remains damaged.
+- The parity arrays themselves have no independent protection.
+- Keys map to a start index using the sum of their character code points modulo the number of spiral cells. Different keys can map to the same or overlapping record ranges, and writes can overwrite cells used by other records.
+- The arena is volatile process memory. There is no persistence, recovery after process exit, concurrency control, or storage-capacity management beyond the fixed grid.
+- This XOR scheme is not a general-purpose error-correction code and provides no guarantee for arbitrary multi-cell faults or parity corruption.
 
 ## License
 
-MIT - see [LICENSE](LICENSE).
+The repository includes an MIT License. See [LICENSE](LICENSE) for its terms and copyright notice.
